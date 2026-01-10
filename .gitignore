@@ -145,3 +145,6 @@ PlantVillage/
 *.zip
 *.tar
 *.gz
+
+notebooks/.streamlit_pid
+
