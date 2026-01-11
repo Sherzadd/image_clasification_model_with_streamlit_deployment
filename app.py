@@ -13,7 +13,7 @@ import streamlit as st
 # Page setup (same look, two-panel layout)
 # -----------------------------
 st.set_page_config(
-    page_title="Plant Disease identification through Artificial Intelligence",
+    page_title="Plant Disease identification through AI",
     page_icon="🌿",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -201,7 +201,7 @@ with right:
 <div style="display:flex; align-items:flex-start; gap:0.75rem;">
   <div style="font-size:2.6rem; line-height:1;">🌿</div>
   <div style="font-size:2.6rem; font-weight:800; line-height:1.08;">
-    Plant Disease identification <br/> through Artificial Intelligence
+    Plant Disease identification through AI
   </div>
 </div>
 """,
@@ -209,8 +209,8 @@ with right:
     )
 
     st.caption(
-        "Upload a plant leaf image and this app will identify the plant disease using your trained artificial intelligence "
-        "(TensorFlow/Keras model)."
+        "Upload a plant leaf image and this app will identify the plant disease using our trained artificial intelligence model"
+        "(TensorFlow/Keras)."
     )
 
     st.divider()
