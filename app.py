@@ -20,7 +20,7 @@ st.set_page_config(
 )
 
 # -----------------------------
-# ✅ Small UI tweaks (left panel red + title same size + rename uploader button)
+# ✅ Small UI tweaks (left panel red + title sizing + rename uploader button)
 # -----------------------------
 st.markdown(
     """
@@ -163,8 +163,9 @@ if classes_error is None:
 
 # -----------------------------
 # TWO "PAGES" (LEFT / RIGHT)
+# ✅ Right side wider now (so title fits in max 2 lines)
 # -----------------------------
-left, right = st.columns([1, 2], gap="large")
+left, right = st.columns([1, 3], gap="large")
 
 
 # -----------------------------
@@ -194,14 +195,14 @@ with left:
 # RIGHT: Title + Upload + Predict
 # -----------------------------
 with right:
-    # Title with BOTH lines the same size (fixes the small circled part)
+    # ✅ Slightly smaller title font now
     st.markdown(
         """
 <div style="display:flex; align-items:flex-start; gap:0.75rem;">
-  <div style="font-size:3.0rem; line-height:1;">🌿</div>
-  <div style="font-size:3.0rem; font-weight:800; line-height:1.05;">
-    Plant Disease identification<br/>
-    through Artificial Intelligence
+  <div style="font-size:2.6rem; line-height:1;">🌿</div>
+  <div style="font-size:2.6rem; font-weight:800; line-height:1.08;">
+    Plant Disease identification through<br/>
+    Artificial Intelligence
   </div>
 </div>
 """,
@@ -226,7 +227,6 @@ with right:
         st.caption(classes_error)
         st.stop()
 
-    # Uploader label already "Take/Upload Photo" + button text is also changed by CSS above
     uploaded = st.file_uploader("Take/Upload Photo", type=["png", "jpg", "jpeg"], key="uploader")
 
     if uploaded is None:
@@ -239,7 +239,6 @@ with right:
     img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
     st.image(img, caption=f"Uploaded image (hash: {img_hash[:8]})", use_container_width=True)
 
-    # Reset/Clear image under the image
     if st.button("Reset / Clear image"):
         st.session_state["last_hash"] = None
         st.session_state["last_pred"] = None
