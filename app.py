@@ -11,12 +11,12 @@ import streamlit as st
 
 
 # -----------------------------
-# Page setup (same look, but two-panel layout)
+# Page setup (same look, two-panel layout)
 # -----------------------------
 st.set_page_config(
     page_title="Plant Disease identification through Artificial Intelligence",
     page_icon="🌿",
-    layout="wide",                  # needed to match your left/right layout screenshot
+    layout="wide",
     initial_sidebar_state="collapsed",
 )
 
@@ -122,14 +122,15 @@ if classes_error is None:
     except Exception as e:
         classes_error = f"class_names.json found, but failed to load ❌\n\n{e}"
 
+
 # -----------------------------
-# TWO "PAGES" (LEFT / RIGHT) like your screenshot
+# TWO "PAGES" (LEFT / RIGHT)
 # -----------------------------
 left, right = st.columns([1, 2], gap="large")
 
 
 # -----------------------------
-# LEFT: User Manual (replaces Settings)
+# LEFT: User Manual
 # -----------------------------
 with left:
     st.header("📘 User Manual")
@@ -151,16 +152,9 @@ with left:
         """
     )
 
-    # Keep the SAME button name you already had
-    if st.button("Reset / Clear image"):
-        st.session_state["last_hash"] = None
-        st.session_state["last_pred"] = None
-        st.session_state["last_probs"] = None
-        st.rerun()
-
 
 # -----------------------------
-# RIGHT: Title + Upload + Predict (unchanged flow)
+# RIGHT: Title + Upload + Predict
 # -----------------------------
 with right:
     st.title("🌿 Plant Disease identification\nthrough Artificial Intelligence")
@@ -169,22 +163,9 @@ with right:
         "(TensorFlow/Keras model)."
     )
 
-    with st.expander("📘 Beginner explanation (click to open)"):
-        st.markdown(
-            """
-**What happens when you upload an image?**
-
-1. You upload a leaf photo (JPG/PNG).
-2. The app loads the saved model.
-3. The app resizes the image to the size the model expects (e.g., 256×256).
-4. The app runs `model.predict(...)` to get probabilities for each class.
-5. The app selects the highest probability (argmax) and shows the predicted label.
-            """
-        )
-
     st.divider()
 
-    # Show errors in the right page (same place as before)
+    # Show errors
     if model_error:
         st.error("Model is not loaded. Please contact the app owner.")
         st.caption(model_error)
@@ -206,6 +187,13 @@ with right:
 
     img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
     st.image(img, caption=f"Uploaded image (hash: {img_hash[:8]})", use_container_width=True)
+
+    # ✅ Reset/Clear image (moved under the image)
+    if st.button("Reset / Clear image"):
+        st.session_state["last_hash"] = None
+        st.session_state["last_pred"] = None
+        st.session_state["last_probs"] = None
+        st.rerun()
 
     x = preprocess(img, model)
 
