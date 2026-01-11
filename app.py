@@ -20,7 +20,7 @@ st.set_page_config(
 )
 
 # -----------------------------
-# ✅ Small UI tweaks (left panel red + title sizing + rename uploader button)
+# UI tweaks (left panel red + title sizing + rename uploader button)
 # -----------------------------
 st.markdown(
     """
@@ -66,8 +66,15 @@ BASE_DIR = Path(__file__).resolve().parent
 MODEL_PATH = (BASE_DIR / "models" / "image_classification_model_linux.keras").resolve()
 CLASSES_PATH = (BASE_DIR / "class_names.json").resolve()
 
-# ✅ Confidence threshold
+# -----------------------------
+# Your rules (thresholds)
+# -----------------------------
 CONFIDENCE_THRESHOLD = 0.50
+
+# NEW: reject obvious non-leaf / bad quality
+LEAF_RATIO_MIN = 0.05        # how much of the image looks like vegetation-ish colors
+BRIGHTNESS_MIN = 0.12        # too dark -> reject
+BLUR_VAR_MIN = 60.0          # too blurry -> reject (adjust if needed)
 
 
 # -----------------------------
@@ -134,6 +141,58 @@ def to_probabilities(pred_vector: np.ndarray) -> np.ndarray:
     if not (0.98 <= s <= 1.02) or (pred_vector.min() < 0):
         pred_vector = tf.nn.softmax(pred_vector).numpy()
     return pred_vector
+
+
+def image_quality_and_leafness(img: Image.Image) -> dict:
+    """
+    Fast heuristics to reject obvious non-leaf images:
+    - brightness (too dark)
+    - blur (Laplacian variance)
+    - leaf_ratio: % pixels in vegetation-ish hue range (HSV)
+    """
+    arr = np.asarray(img.convert("RGB")).astype(np.float32)
+    brightness = float(arr.mean() / 255.0)
+
+    # Blur score: Laplacian variance (simple 4-neighbor Laplacian)
+    gray = arr.mean(axis=2)
+    up = np.roll(gray, -1, axis=0)
+    down = np.roll(gray, 1, axis=0)
+    left = np.roll(gray, -1, axis=1)
+    right = np.roll(gray, 1, axis=1)
+    lap = (up + down + left + right) - 4.0 * gray
+    blur_var = float(lap.var())
+
+    # Leaf ratio via HSV (vectorized)
+    rgb = arr / 255.0
+    r = rgb[..., 0]
+    g = rgb[..., 1]
+    b = rgb[..., 2]
+    maxc = np.maximum(np.maximum(r, g), b)
+    minc = np.minimum(np.minimum(r, g), b)
+    delta = maxc - minc
+
+    h = np.zeros_like(maxc)
+    mask = delta > 1e-6
+
+    # hue calc
+    idx = mask & (maxc == r)
+    h[idx] = ((g[idx] - b[idx]) / delta[idx]) % 6.0
+    idx = mask & (maxc == g)
+    h[idx] = ((b[idx] - r[idx]) / delta[idx]) + 2.0
+    idx = mask & (maxc == b)
+    h[idx] = ((r[idx] - g[idx]) / delta[idx]) + 4.0
+    h = (h / 6.0) % 1.0  # 0..1
+
+    s = np.zeros_like(maxc)
+    idx2 = maxc > 1e-6
+    s[idx2] = delta[idx2] / maxc[idx2]
+    v = maxc
+
+    # vegetation-ish hues: yellow->green (tolerant)
+    leaf_mask = (h >= 0.12) & (h <= 0.50) & (s >= 0.15) & (v >= 0.15)
+    leaf_ratio = float(leaf_mask.mean())
+
+    return {"brightness": brightness, "blur_var": blur_var, "leaf_ratio": leaf_ratio}
 
 
 # -----------------------------
@@ -232,8 +291,7 @@ with right:
         st.info(
             "Upload photos and get the result.\n"
             "For best results, follow the User Manual on the left.\n"
-            "For any issues, please contact the app owner with the following email:\n"
-            "sherzadzabihullah@yahoo.com."
+            "For any issues, please contact the app owner."
         )
         st.stop()
 
@@ -250,6 +308,22 @@ with right:
         st.session_state["last_is_confident"] = None
         st.rerun()
 
+    # -----------------------------
+    # NEW: Reject obvious non-leaf / bad quality BEFORE prediction
+    # -----------------------------
+    q = image_quality_and_leafness(img)
+
+    if q["brightness"] < BRIGHTNESS_MIN or q["blur_var"] < BLUR_VAR_MIN:
+        st.warning("⚠️ The image is blur or low quality, please upload another photo and try again.")
+        st.stop()
+
+    if q["leaf_ratio"] < LEAF_RATIO_MIN:
+        st.warning("⚠️ This does not look like a plant leaf. Please upload a clear leaf photo and try again.")
+        st.stop()
+
+    # -----------------------------
+    # Predict
+    # -----------------------------
     x = preprocess(img, model)
 
     if st.session_state.get("last_hash") != img_hash or st.session_state.get("last_probs") is None:
@@ -283,9 +357,10 @@ with right:
     pred_id = int(st.session_state["last_pred"])
     confidence = float(probs[pred_id])
 
-    # ✅ New message you approved
-    if not st.session_state.get("last_is_confident", False):
-        st.warning("⚠️ This does not look like a plant leaf. Please upload a clear leaf photo and try again.")
+    # YOUR RULE:
+    # show prediction only if best >= 50%
+    if confidence < CONFIDENCE_THRESHOLD:
+        st.warning("⚠️ The image is blur or low quality, please upload another photo and try again.")
         st.stop()
 
     pred_label = class_names[pred_id]
