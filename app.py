@@ -66,6 +66,9 @@ BASE_DIR = Path(__file__).resolve().parent
 MODEL_PATH = (BASE_DIR / "models" / "image_classification_model_linux.keras").resolve()
 CLASSES_PATH = (BASE_DIR / "class_names.json").resolve()
 
+# ✅ Confidence threshold (your request)
+CONFIDENCE_THRESHOLD = 0.50
+
 
 # -----------------------------
 # Helper functions
@@ -229,9 +232,12 @@ with right:
     uploaded = st.file_uploader("Take/Upload Photo", type=["png", "jpg", "jpeg"], key="uploader")
 
     if uploaded is None:
-        st.info("Upload photos and get the result.\n For best results, follow the User Manual on the left.\n" \
-        "For any issues, please contact the app owner with the following email:\n"
-        "sherzadzabihullah@yahoo.com.")
+        st.info(
+            "Upload photos and get the result.\n"
+            "For best results, follow the User Manual on the left.\n"
+            "For any issues, please contact the app owner with the following email:\n"
+            "sherzadzabihullah@yahoo.com."
+        )
         st.stop()
 
     img_bytes = uploaded.getvalue()
@@ -244,10 +250,12 @@ with right:
         st.session_state["last_hash"] = None
         st.session_state["last_pred"] = None
         st.session_state["last_probs"] = None
+        st.session_state["last_is_confident"] = None
         st.rerun()
 
     x = preprocess(img, model)
 
+    # Only predict if image changed (or first time)
     if st.session_state.get("last_hash") != img_hash or st.session_state.get("last_probs") is None:
         preds = model.predict(x, verbose=0)
 
@@ -258,8 +266,8 @@ with right:
             preds = preds[0]
 
         probs = to_probabilities(preds)
-        pred_id = int(np.argmax(probs))
 
+        pred_id = int(np.argmax(probs))
         if pred_id >= len(class_names):
             st.error(
                 f"Prediction index {pred_id} is outside class_names list (length {len(class_names)}). "
@@ -267,23 +275,37 @@ with right:
             )
             st.stop()
 
+        best_conf = float(probs[pred_id])
+        is_confident = best_conf >= CONFIDENCE_THRESHOLD
+
         st.session_state["last_hash"] = img_hash
         st.session_state["last_probs"] = probs
         st.session_state["last_pred"] = pred_id
+        st.session_state["last_is_confident"] = is_confident
 
+    # Read cached results
     probs = st.session_state["last_probs"]
     pred_id = int(st.session_state["last_pred"])
-    pred_label = class_names[pred_id]
     confidence = float(probs[pred_id])
+
+    # ✅ YOUR RULES:
+    # 1) Show prediction only if confidence >= 50%
+    # 2) Otherwise show "blur/low quality" message
+    if not st.session_state.get("last_is_confident", False):
+        st.warning("⚠️ The image is blur or low quality, please upload another photo and try again.")
+        st.stop()
+
+    pred_label = class_names[pred_id]
 
     st.success(f"✅ Predicted class: **{pred_label}**")
     st.write(f"Confidence: **{confidence:.2%}**")
 
-    st.subheader("3) Top predictions")
-    top_k = min(5, len(probs))
-    top_idx = np.argsort(probs)[::-1][:top_k]
+    # Show only predictions >= 50% (usually only 1 in softmax models)
+    st.subheader("3) Top predictions (≥ 50%)")
+    idx_over = np.where(np.asarray(probs) >= CONFIDENCE_THRESHOLD)[0]
+    idx_over = idx_over[np.argsort(np.asarray(probs)[idx_over])[::-1]]
 
-    for rank, i in enumerate(top_idx, start=1):
+    for rank, i in enumerate(idx_over, start=1):
         st.write(f"{rank}. {class_names[int(i)]} — {float(probs[int(i)]):.2%}")
 
     st.caption("Tip: If predictions look wrong, try a brighter/sharper photo with a plain background.")
