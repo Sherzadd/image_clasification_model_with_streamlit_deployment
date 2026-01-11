@@ -209,7 +209,7 @@ with right:
     )
 
     st.caption(
-        "Upload a plant leaf image and this app will identify the plant disease using our trained artificial intelligence model"
+        "Upload a plant leaf image and this app will identify the plant disease using our trained artificial intelligence model "
         "(TensorFlow/Keras)."
     )
 
@@ -229,7 +229,7 @@ with right:
     uploaded = st.file_uploader("Take/Upload Photo", type=["png", "jpg", "jpeg"], key="uploader")
 
     if uploaded is None:
-        st.info("Upload an image to get a prediction.")
+        st.info("Upload image and get the result.")
         st.stop()
 
     img_bytes = uploaded.getvalue()
