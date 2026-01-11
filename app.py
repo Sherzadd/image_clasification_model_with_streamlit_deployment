@@ -9,36 +9,7 @@ import tensorflow as tf
 import streamlit as st
 
 # -----------------------------
-# ✅ Robust paths (works local + Streamlit Cloud)
-# -----------------------------
-BASE_DIR = Path(__file__).resolve().parent
-MODELS_DIR = (BASE_DIR / "models").resolve()
-CLASSES_PATH = (BASE_DIR / "class_names.json").resolve()
-
-# Prefer this model name if present; otherwise pick the first .keras in models/
-PREFERRED_MODEL_NAMES = [
-    "image_classification_model_linux.keras",
-    "image_classification_model.keras",
-]
-
-
-def pick_model_file() -> Path | None:
-    """Pick a model file from models/ without exposing a UI setting."""
-    for name in PREFERRED_MODEL_NAMES:
-        p = (MODELS_DIR / name).resolve()
-        if p.exists():
-            return p
-
-    if MODELS_DIR.exists():
-        all_models = sorted(MODELS_DIR.glob("*.keras"))
-        if all_models:
-            return all_models[0].resolve()
-
-    return None
-
-
-# -----------------------------
-# Page setup (sidebar collapsed by default)
+# ✅ Page setup (same style, no Settings sidebar)
 # -----------------------------
 st.set_page_config(
     page_title="Plant Disease identification through Artificial Intelligence",
@@ -54,29 +25,33 @@ st.caption(
 )
 
 # -----------------------------
-# 📘 User Manual (replaces Settings sidebar)
+# ✅ Hidden (internal) paths
 # -----------------------------
-with st.expander("📘 User Manual", expanded=True):
-    st.markdown(
-        """
-### How to take a good photo (important)
-- Use **bright natural light** (avoid very dark photos).
-- Keep the leaf **in focus** (**no blur**).
-- Capture **one leaf clearly** (let the leaf fill most of the frame).
-- Use a **plain background** if possible.
-- Avoid strong **shadows**, **reflections**, and **filters**.
-- Don’t crop too tightly — include the **full infected area**.
+BASE_DIR = Path(__file__).resolve().parent
+MODELS_DIR = (BASE_DIR / "models").resolve()
+CLASSES_PATH = (BASE_DIR / "class_names.json").resolve()
 
-### How to use the app
-1. Click **Take a photo** OR **Upload an image**.
-2. Wait a moment for the prediction.
-3. Read the **predicted class** and **confidence**.
+# Prefer these model names if present; otherwise pick the first .keras in models/
+PREFERRED_MODEL_NAMES = [
+    "image_classification_model_linux.keras",
+    "image_classification_model.keras",
+]
 
-**Supported files:** PNG, JPG, JPEG
-        """
-    )
 
-st.divider()
+def pick_model_file() -> Path | None:
+    """Pick a model file from models/ without exposing any UI setting."""
+    for name in PREFERRED_MODEL_NAMES:
+        p = (MODELS_DIR / name).resolve()
+        if p.exists():
+            return p
+
+    if MODELS_DIR.exists():
+        all_models = sorted(MODELS_DIR.glob("*.keras"))
+        if all_models:
+            return all_models[0].resolve()
+
+    return None
+
 
 # -----------------------------
 # Helper functions
@@ -91,11 +66,10 @@ def load_class_names(path: Path) -> list[str]:
 
 @st.cache_resource
 def load_model_cached(model_path: str, mtime: float):
-    """Cache model and reload automatically when the file changes (mtime changes)."""
+    # Cache model and reload automatically when the file changes (mtime changes)
     try:
         return tf.keras.models.load_model(model_path, compile=False)
     except TypeError:
-        # Some Keras versions support safe_mode
         return tf.keras.models.load_model(model_path, compile=False, safe_mode=False)
 
 
@@ -109,24 +83,33 @@ def model_has_rescaling_layer(model: tf.keras.Model) -> bool:
                 if _has(sub):
                     return True
         return False
+
     return _has(model)
 
 
 def preprocess(img: Image.Image, model: tf.keras.Model) -> np.ndarray:
-    """PIL -> (1,H,W,3) float32, resized to model input. Avoid double-rescale if model already has Rescaling."""
+    """
+    Convert PIL image -> NumPy batch (1, H, W, 3)
+
+    Resize to the model input size.
+    Do NOT divide by 255 if the model already contains Rescaling(1/255).
+    """
     img = img.convert("RGB")
+
+    # Read model input shape like: (None, 256, 256, 3)
     in_shape = getattr(model, "input_shape", None)
 
-    # Resize to model expected input size (e.g., 256x256)
+    # Resize if we have a fixed size
     if isinstance(in_shape, tuple) and len(in_shape) == 4:
         target_h, target_w = in_shape[1], in_shape[2]
         if target_h is not None and target_w is not None:
             img = img.resize((target_w, target_h), Image.BILINEAR)
 
-    x = np.array(img).astype("float32")
-    x = np.expand_dims(x, 0)
+    x = np.array(img)              # (H, W, 3), uint8
+    x = np.expand_dims(x, 0)       # (1, H, W, 3)
+    x = x.astype("float32")
 
-    # Only scale if model doesn't already include Rescaling(1/255)
+    # Only scale if the model does NOT contain a Rescaling layer
     if not model_has_rescaling_layer(model):
         x = x / 255.0
 
@@ -134,7 +117,10 @@ def preprocess(img: Image.Image, model: tf.keras.Model) -> np.ndarray:
 
 
 def to_probabilities(pred_vector: np.ndarray) -> np.ndarray:
-    """Ensure output behaves like probabilities; apply softmax if needed."""
+    """
+    Ensure the output behaves like probabilities.
+    If it doesn't sum to ~1, apply softmax.
+    """
     pred_vector = np.asarray(pred_vector).astype("float32")
     s = float(pred_vector.sum())
     if not (0.98 <= s <= 1.02) or (pred_vector.min() < 0):
@@ -143,7 +129,7 @@ def to_probabilities(pred_vector: np.ndarray) -> np.ndarray:
 
 
 # -----------------------------
-# Load model + class names (hidden: no sidebar UI)
+# Load model + class names (hidden, no sidebar)
 # -----------------------------
 model_path = pick_model_file()
 if model_path is None:
@@ -166,7 +152,7 @@ except Exception:
     st.error("⚠️ Class labels could not be loaded. Please contact the app owner.")
     st.stop()
 
-# Optional silent sanity check
+# Optional quiet sanity check
 try:
     if hasattr(model, "output_shape") and model.output_shape[-1] is not None:
         out_dim = int(model.output_shape[-1])
@@ -178,75 +164,95 @@ except Exception:
 
 
 # -----------------------------
-# Upload + Predict (camera OR upload)
+# Layout: User manual LEFT, App RIGHT (no camera option)
 # -----------------------------
-c1, c2 = st.columns(2)
+left, right = st.columns([1, 2], gap="large")
 
-with c1:
-    cam = st.camera_input("Take a photo")
+with left:
+    st.subheader("📘 User Manual")
 
-with c2:
-    uploaded = st.file_uploader("Upload an image", type=["png", "jpg", "jpeg"], key="uploader")
+    st.markdown(
+        """
+**How to take a good photo (important):**
+- Use **bright natural light** (avoid very dark photos).
+- Keep the leaf **in focus** (no blur).
+- Capture **one leaf clearly** (fill most of the frame).
+- Use a **plain background** if possible.
+- Avoid strong **shadows**, **reflections**, and **filters**.
+- Don’t crop too tightly — include the **full infected area**.
 
-# Reset button (moved from sidebar to main page)
-if st.button("Reset / Clear"):
-    st.session_state["last_hash"] = None
-    st.session_state["last_pred"] = None
-    st.session_state["last_probs"] = None
-    st.rerun()
+**How to use the app:**
+1. **Upload an image** (PNG / JPG / JPEG).
+2. Wait a moment for the prediction.
+3. Read the **predicted class** and **confidence**.
+        """
+    )
 
-file_obj = cam if cam is not None else uploaded
-if file_obj is None:
-    st.info("Take a photo or upload an image to get a prediction.")
-    st.stop()
+with right:
+    st.subheader("🌿 Upload a leaf image")
 
-# Read bytes
-img_bytes = file_obj.getvalue()
-img_hash = hashlib.md5(img_bytes).hexdigest()
+    # --- Reset button (kept, but moved to main area) ---
+    if st.button("Reset / Clear"):
+        st.session_state["last_hash"] = None
+        st.session_state["last_pred"] = None
+        st.session_state["last_probs"] = None
+        st.rerun()
 
-# Open image
-img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
-st.image(img, caption="Selected image", use_container_width=True)
+    uploaded = st.file_uploader("Choose an image", type=["png", "jpg", "jpeg"], key="uploader")
 
-# Preprocess + predict
-x = preprocess(img, model)
-
-if st.session_state.get("last_hash") != img_hash or st.session_state.get("last_probs") is None:
-    preds = model.predict(x, verbose=0)
-
-    if isinstance(preds, (list, tuple)):
-        preds = preds[0]
-    preds = np.asarray(preds)
-    if preds.ndim == 2:
-        preds = preds[0]  # (n_classes,)
-
-    probs = to_probabilities(preds)
-
-    pred_id = int(np.argmax(probs))
-    if pred_id >= len(class_names):
-        st.error(
-            "⚠️ Prediction index is outside the class label list. "
-            "This means class_names.json does not match the model output order."
-        )
+    if uploaded is None:
+        st.info("Upload an image to get a prediction.")
         st.stop()
 
-    st.session_state["last_hash"] = img_hash
-    st.session_state["last_probs"] = probs
-    st.session_state["last_pred"] = pred_id
+    # Read bytes
+    img_bytes = uploaded.getvalue()
+    img_hash = hashlib.md5(img_bytes).hexdigest()
 
-# Show results
-probs = st.session_state["last_probs"]
-pred_id = int(st.session_state["last_pred"])
-pred_label = class_names[pred_id]
-confidence = float(probs[pred_id])
+    # Open image
+    img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+    st.image(img, caption="Selected image", use_container_width=True)
 
-st.success(f"✅ Predicted class: **{pred_label}**")
-st.write(f"Confidence: **{confidence:.2%}**")
+    # Preprocess + predict
+    x = preprocess(img, model)
 
-st.subheader("Top predictions")
-top_k = min(5, len(probs))
-top_idx = np.argsort(probs)[::-1][:top_k]
-for rank, i in enumerate(top_idx, start=1):
-    st.write(f"{rank}. {class_names[int(i)]} — {float(probs[int(i)]):.2%}")
+    # Only predict if image changed (or first time)
+    if st.session_state.get("last_hash") != img_hash or st.session_state.get("last_probs") is None:
+        preds = model.predict(x, verbose=0)
 
-st.caption("Tip: If results look wrong, try a brighter/sharper photo with a plain background.")
+        if isinstance(preds, (list, tuple)):
+            preds = preds[0]
+        preds = np.asarray(preds)
+        if preds.ndim == 2:
+            preds = preds[0]  # (n_classes,)
+
+        probs = to_probabilities(preds)
+        pred_id = int(np.argmax(probs))
+
+        if pred_id >= len(class_names):
+            st.error(
+                "⚠️ Prediction index is outside the class label list. "
+                "This means class_names.json does not match the model output order."
+            )
+            st.stop()
+
+        st.session_state["last_hash"] = img_hash
+        st.session_state["last_probs"] = probs
+        st.session_state["last_pred"] = pred_id
+
+    # Read cached results
+    probs = st.session_state["last_probs"]
+    pred_id = int(st.session_state["last_pred"])
+    pred_label = class_names[pred_id]
+    confidence = float(probs[pred_id])
+
+    st.success(f"✅ Predicted class: **{pred_label}**")
+    st.write(f"Confidence: **{confidence:.2%}**")
+
+    st.subheader("Top predictions")
+    top_k = min(5, len(probs))
+    top_idx = np.argsort(probs)[::-1][:top_k]
+
+    for rank, i in enumerate(top_idx, start=1):
+        st.write(f"{rank}. {class_names[int(i)]} — {float(probs[int(i)]):.2%}")
+
+    st.caption("Tip: If results look wrong, try a brighter/sharper photo with a plain background.")
