@@ -201,8 +201,7 @@ with right:
 <div style="display:flex; align-items:flex-start; gap:0.75rem;">
   <div style="font-size:2.6rem; line-height:1;">🌿</div>
   <div style="font-size:2.6rem; font-weight:800; line-height:1.08;">
-    Plant Disease identification through<br/>
-    Artificial Intelligence
+    Plant Disease identification <br/> through Artificial Intelligence
   </div>
 </div>
 """,
