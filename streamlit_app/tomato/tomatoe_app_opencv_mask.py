@@ -166,21 +166,39 @@ def image_quality(img: Image.Image, mask_255: np.ndarray | None = None) -> dict:
  # Mask utilities (OpenCV)
  # -----------------------------
 def _refine_mask(mask_255: np.ndarray) -> np.ndarray:
-    """Morphology cleanup + keep up to 3 largest components."""
-    m = (mask_255 > 0).astype(np.uint8)
+    """Morphology cleanup + fill internal holes + keep up to 3 largest components."""
+    m = (mask_255 > 0).astype(np.uint8) * 255
 
+    # Smooth edges / remove small noise
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
     m = cv2.morphologyEx(m, cv2.MORPH_CLOSE, kernel, iterations=2)
     m = cv2.morphologyEx(m, cv2.MORPH_OPEN, kernel, iterations=1)
 
-    num, labels, stats, _ = cv2.connectedComponentsWithStats(m, connectivity=8)
-    if num <= 1:
-        return (m * 255).astype(np.uint8)
+    # Fill holes so dark/yellow/brown symptoms inside the leaf are NOT removed from the mask
+    # (important for previews and any mask-based metrics)
+    h, w = m.shape[:2]
+    seed = None
+    for sx, sy in [(0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1)]:
+        if m[sy, sx] == 0:
+            seed = (sx, sy)
+            break
+
+    if seed is not None:
+        flood = m.copy()
+        ffmask = np.zeros((h + 2, w + 2), np.uint8)
+        cv2.floodFill(flood, ffmask, seedPoint=seed, newVal=255)
+        holes = cv2.bitwise_not(flood)
+        m = cv2.bitwise_or(m, holes)
 
     # Keep up to 3 biggest foreground components
+    m_bin = (m > 0).astype(np.uint8)
+    num, labels, stats, _ = cv2.connectedComponentsWithStats(m_bin, connectivity=8)
+    if num <= 1:
+        return (m_bin * 255).astype(np.uint8)
+
     areas = stats[1:, cv2.CC_STAT_AREA]
     idx_sorted = np.argsort(areas)[::-1]
-    keep = np.zeros_like(m)
+    keep = np.zeros_like(m_bin)
     for k in idx_sorted[:3]:
         keep[labels == (k + 1)] = 1
 
@@ -278,11 +296,17 @@ def _pad_bbox(bbox, W, H, pad_frac: float = 0.06):
     return x0, y0, x1, y1
 
 
-def _apply_white_bg(img: Image.Image, mask_255: np.ndarray) -> Image.Image:
-    """Preview-only: show masked image with white background."""
-    mask_img = Image.fromarray(mask_255.astype(np.uint8), mode="L")
-    white = Image.new("RGB", img.size, (255, 255, 255))
-    return Image.composite(img, white, mask_img)
+def _overlay_mask_on_crop(crop_img: Image.Image, mask_crop_255: np.ndarray, alpha: float = 0.35) -> Image.Image:
+    """Preview-only: overlay mask on ORIGINAL crop (symptoms stay visible)."""
+    arr = np.asarray(crop_img.convert("RGB"), dtype=np.uint8)
+    m = (mask_crop_255 > 0)
+    if not bool(np.any(m)):
+        return crop_img
+
+    overlay = arr.copy()
+    color = np.array([0, 255, 0], dtype=np.uint8)
+    overlay[m] = (overlay[m] * (1 - alpha) + color * alpha).astype(np.uint8)
+    return Image.fromarray(overlay)
 
 
 def mask_leaf_for_prediction(img: Image.Image):
@@ -306,15 +330,14 @@ def mask_leaf_for_prediction(img: Image.Image):
             bbox = _pad_bbox(bbox, W, H)
             x0, y0, x1, y1 = bbox
 
-            # ORIGINAL crop used for prediction ✅
+            # ORIGINAL crop used for prediction ✅ (symptoms preserved)
             pred_img = img.crop((x0, y0, x1 + 1, y1 + 1))
 
-            # Preview crop (white background)
-            preview_full = _apply_white_bg(img, mask_255)
-            preview = preview_full.crop((x0, y0, x1 + 1, y1 + 1))
-
-            # Mask crop for quality metrics
+            # Mask crop for quality metrics + preview overlay
             mask_crop_255 = mask_255[y0:y1 + 1, x0:x1 + 1]
+
+            # Preview: overlay mask on the ORIGINAL crop (no symptom removal)
+            preview = _overlay_mask_on_crop(pred_img, mask_crop_255)
 
             info = {"kept_ratio": kept_ratio, "method": method, "bbox": bbox, "mask_crop_255": mask_crop_255}
             return pred_img, preview, info
